@@ -2,7 +2,7 @@ import streamlit as st, pandas as pd, sqlite3
 
 st.set_page_config(page_title="ระบบสหกรณ์โรงเรียน", page_icon="🏫", layout="wide")
 
-# --- 1. Database Helper (ย่อฟังก์ชัน DB) ---
+# --- 1. Database Helper ---
 def run_sql(query, params=(), fetch=False):
     with sqlite3.connect("coop_database.db") as conn:
         conn.row_factory = sqlite3.Row
@@ -41,11 +41,21 @@ if menu == "📊 หน้าแรก (Dashboard)":
     col_l, col_r = st.columns([2, 1])
     with col_l:
         st.subheader("📦 จำนวนสินค้าคงเหลือ")
-        st.bar_chart(df_products.set_index("name")["qty"]) if not df_products.empty else st.info("ไม่มีข้อมูลสินค้า")
+        if not df_products.empty:
+            st.bar_chart(df_products.set_index("name")["qty"])
+        else:
+            st.info("ไม่มีข้อมูลสินค้า")
+            
     with col_r:
         st.subheader("⚠️ สินค้าเหลือน้อย (< 10)")
-        alert = df_products[df_products["qty"] < 10][["id", "name", "qty"]] if not df_products.empty else pd.DataFrame()
-        st.dataframe(alert, hide_index=True) if not alert.empty else st.success("สินค้าเพียงพอ")
+        if not df_products.empty:
+            alert = df_products[df_products["qty"] < 10][["id", "name", "qty"]]
+            if not alert.empty:
+                st.dataframe(alert, hide_index=True)
+            else:
+                st.success("สินค้าเพียงพอ")
+        else:
+            st.success("สินค้าเพียงพอ")
 
 # --- 4. จัดการสินค้า ---
 elif menu == "📦 จัดการสินค้าในสต็อก":
