@@ -2,27 +2,31 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 
-# ตั้งค่าหน้าเว็บ
+# ==========================================
+# โปรเจกต์วิชาคอมพิวเตอร์ ม.4
+# ระบบจัดการสต็อกและบัญชีร้านค้าสหกรณ์โรงเรียน
+# ==========================================
+
 st.set_page_config(
-    page_title="ระบบจัดการสต็อกและบัญชีสหกรณ์",
-    page_icon="🏛️",
+    page_title="ระบบสหกรณ์โรงเรียนสวนกุหลาบวิทยาลัย รังสิต",
+    page_icon="🏫",
     layout="wide"
 )
 
-# ------------------ 1. DATABASE SETUP (SQLITE) ------------------
+# ---------------- 1. สร้างฐานข้อมูล SQLite ----------------
 DB_NAME = "coop_database.db"
 
-def get_db_connection():
+def connect_db():
     conn = sqlite3.connect(DB_NAME)
     conn.row_factory = sqlite3.Row
     return conn
 
-def init_db():
-    conn = get_db_connection()
-    cursor = conn.cursor()
+def create_tables():
+    conn = connect_db()
+    c = conn.cursor()
     
-    # ตารางสินค้า
-    cursor.execute("""
+    # ตารางเก็บข้อมูลสินค้า
+    c.execute("""
         CREATE TABLE IF NOT EXISTS products (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
@@ -32,8 +36,8 @@ def init_db():
         )
     """)
     
-    # ตารางประวัติการขาย
-    cursor.execute("""
+    # ตารางเก็บประวัติการขาย
+    c.execute("""
         CREATE TABLE IF NOT EXISTS sales (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             product_id TEXT NOT NULL,
@@ -46,8 +50,8 @@ def init_db():
         )
     """)
     
-    # ตารางประวัติรายจ่าย
-    cursor.execute("""
+    # ตารางเก็บประวัติรายจ่าย
+    c.execute("""
         CREATE TABLE IF NOT EXISTS expenses (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             description TEXT NOT NULL,
@@ -59,11 +63,11 @@ def init_db():
     conn.commit()
     conn.close()
 
-init_db()
+create_tables()
 
-# ------------------ 2. DATABASE HELPER FUNCTIONS ------------------
-def load_products():
-    conn = get_db_connection()
+# ---------------- 2. ฟังก์ชันจัดการข้อมูล (Database Helper) ----------------
+def get_all_products():
+    conn = connect_db()
     df = pd.read_sql_query("SELECT * FROM products", conn)
     conn.close()
     if not df.empty:
@@ -72,39 +76,39 @@ def load_products():
         df['qty'] = pd.to_numeric(df['qty'], errors='coerce').fillna(0).astype(int)
     return df
 
-def add_product(p_id, p_name, p_cost, p_price, p_qty):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
+def save_new_product(p_id, p_name, p_cost, p_price, p_qty):
+    conn = connect_db()
+    c = conn.cursor()
+    c.execute(
         "INSERT INTO products (id, name, cost, price, qty) VALUES (?, ?, ?, ?, ?)",
         (str(p_id), str(p_name), float(p_cost), float(p_price), int(p_qty))
     )
     conn.commit()
     conn.close()
 
-def update_product_info(p_id, p_name, p_cost, p_price, new_qty):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
+def update_product_data(p_id, p_name, p_cost, p_price, new_qty):
+    conn = connect_db()
+    c = conn.cursor()
+    c.execute(
         "UPDATE products SET name = ?, cost = ?, price = ?, qty = ? WHERE id = ?",
         (str(p_name), float(p_cost), float(p_price), int(new_qty), str(p_id))
     )
     conn.commit()
     conn.close()
 
-def delete_product(p_id):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM products WHERE id = ?", (str(p_id),))
+def remove_product(p_id):
+    conn = connect_db()
+    c = conn.cursor()
+    c.execute("DELETE FROM products WHERE id = ?", (str(p_id),))
     conn.commit()
     conn.close()
 
-def record_sale(p_id, p_name, qty, price, total_price, total_cost, current_stock):
-    conn = get_db_connection()
-    cursor = conn.cursor()
+def save_sale_transaction(p_id, p_name, qty, price, total_price, total_cost, current_stock):
+    conn = connect_db()
+    c = conn.cursor()
     new_stock = int(current_stock) - int(qty)
-    cursor.execute("UPDATE products SET qty = ? WHERE id = ?", (new_stock, str(p_id)))
-    cursor.execute(
+    c.execute("UPDATE products SET qty = ? WHERE id = ?", (new_stock, str(p_id)))
+    c.execute(
         """INSERT INTO sales (product_id, product_name, qty, price_per_unit, total_price, total_cost)
            VALUES (?, ?, ?, ?, ?, ?)""",
         (str(p_id), str(p_name), int(qty), float(price), float(total_price), float(total_cost))
@@ -112,26 +116,24 @@ def record_sale(p_id, p_name, qty, price, total_price, total_cost, current_stock
     conn.commit()
     conn.close()
 
-def update_sale_record(sale_id, p_id, old_qty, new_qty, new_price, unit_cost):
-    conn = get_db_connection()
-    cursor = conn.cursor()
+def edit_sale_transaction(sale_id, p_id, old_qty, new_qty, new_price, unit_cost):
+    conn = connect_db()
+    c = conn.cursor()
     
-    # คำนวณส่วนต่างของจำนวน เพื่อไปคืน/ตัด เพิ่มในสต็อก
     qty_diff = new_qty - old_qty
     
-    # ดึงสต็อกปัจจุบันของสินค้า
-    cursor.execute("SELECT qty FROM products WHERE id = ?", (str(p_id),))
-    prod = cursor.fetchone()
+    c.execute("SELECT qty FROM products WHERE id = ?", (str(p_id),))
+    prod = c.fetchone()
     
     if prod:
         current_qty = prod["qty"]
         adjusted_stock = current_qty - qty_diff
-        cursor.execute("UPDATE products SET qty = ? WHERE id = ?", (adjusted_stock, str(p_id)))
+        c.execute("UPDATE products SET qty = ? WHERE id = ?", (adjusted_stock, str(p_id)))
     
     total_price = new_qty * new_price
     total_cost = new_qty * unit_cost
     
-    cursor.execute(
+    c.execute(
         """UPDATE sales 
            SET qty = ?, price_per_unit = ?, total_price = ?, total_cost = ? 
            WHERE id = ?""",
@@ -140,152 +142,151 @@ def update_sale_record(sale_id, p_id, old_qty, new_qty, new_price, unit_cost):
     conn.commit()
     conn.close()
 
-def delete_sale_record(sale_id, p_id, qty_to_return):
-    conn = get_db_connection()
-    cursor = conn.cursor()
+def cancel_sale_transaction(sale_id, p_id, qty_to_return):
+    conn = connect_db()
+    c = conn.cursor()
     
-    # คืนสต็อกกลับเข้าคลัง
-    cursor.execute("SELECT qty FROM products WHERE id = ?", (str(p_id),))
-    prod = cursor.fetchone()
+    c.execute("SELECT qty FROM products WHERE id = ?", (str(p_id),))
+    prod = c.fetchone()
     if prod:
-        cursor.execute("UPDATE products SET qty = ? WHERE id = ?", (prod["qty"] + qty_to_return, str(p_id)))
+        c.execute("UPDATE products SET qty = ? WHERE id = ?", (prod["qty"] + qty_to_return, str(p_id)))
         
-    cursor.execute("DELETE FROM sales WHERE id = ?", (int(sale_id),))
+    c.execute("DELETE FROM sales WHERE id = ?", (int(sale_id),))
     conn.commit()
     conn.close()
 
-def load_sales():
-    conn = get_db_connection()
+def get_all_sales():
+    conn = connect_db()
     df = pd.read_sql_query("SELECT * FROM sales ORDER BY id DESC", conn)
     conn.close()
     return df
 
-def add_expense(desc, amount):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO expenses (description, amount) VALUES (?, ?)", (str(desc), float(amount)))
+def save_expense(desc, amount):
+    conn = connect_db()
+    c = conn.cursor()
+    c.execute("INSERT INTO expenses (description, amount) VALUES (?, ?)", (str(desc), float(amount)))
     conn.commit()
     conn.close()
 
-def update_expense(exp_id, desc, amount):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE expenses SET description = ?, amount = ? WHERE id = ?", (str(desc), float(amount), int(exp_id)))
+def edit_expense(exp_id, desc, amount):
+    conn = connect_db()
+    c = conn.cursor()
+    c.execute("UPDATE expenses SET description = ?, amount = ? WHERE id = ?", (str(desc), float(amount), int(exp_id)))
     conn.commit()
     conn.close()
 
-def delete_expense(exp_id):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM expenses WHERE id = ?", (int(exp_id),))
+def remove_expense(exp_id):
+    conn = connect_db()
+    c = conn.cursor()
+    c.execute("DELETE FROM expenses WHERE id = ?", (int(exp_id),))
     conn.commit()
     conn.close()
 
-def load_expenses():
-    conn = get_db_connection()
+def get_all_expenses():
+    conn = connect_db()
     df = pd.read_sql_query("SELECT * FROM expenses ORDER BY id DESC", conn)
     conn.close()
     return df
 
-def convert_df_to_csv(df):
+def make_csv_file(df):
     return df.to_csv(index=False).encode('utf-8-sig')
 
-# ------------------ 3. HEADER & NAVIGATION ------------------
-st.title("🏛️ ระบบจัดการสต็อกและบัญชีสหกรณ์")
-st.caption("ระบบสำหรับบริหารจัดการคลังสินค้า บันทึกการขาย รายจ่าย และจัดสรรกำไรสหกรณ์ (บันทึกข้อมูลถาวรด้วย SQLite)")
+# ---------------- 3. หน้าต่างโปรแกรมหลัก & แถบเมนู ----------------
+st.title("🏫 โปรแกรมสหกรณ์ร้านค้าโรงเรียน")
+st.caption("จัดทำโดยนักเรียนชั้น ม.4 (ระบบบันทึกข้อมูลคลังสินค้า การขาย และบัญชี)")
 
-menu = st.sidebar.radio(
-    "เลือกเมนูการทำงาน",
+menu_choice = st.sidebar.radio(
+    "เมนูหลัก",
     [
-        "📊 แดชบอร์ดภาพรวม",
-        "📦 จัดการสต็อกสินค้า",
-        "🛒 บันทึกการขาย",
-        "💸 บันทึกรายจ่ายอื่นๆ",
-        "📊 สรุปบัญชีประจำปี & จัดสรรกำไร"
+        "📊 หน้าแรก (Dashboard)",
+        "📦 จัดการสินค้าในสต็อก",
+        "🛒 ขายสินค้า",
+        "💸 บันทึกค่าใช้จ่าย",
+        "📊 สรุปยอดและแบ่งปันผล"
     ]
 )
 
-df_products = load_products()
-df_sales = load_sales()
-df_expenses = load_expenses()
+df_products = get_all_products()
+df_sales = get_all_sales()
+df_expenses = get_all_expenses()
 
-# ------------------ 4. MENU 1: OVERVIEW DASHBOARD ------------------
-if menu == "📊 แดชบอร์ดภาพรวม":
-    st.header("📊 ภาพรวมการดำเนินงาน")
+# ---------------- 4. เมนูที่ 1: หน้าแรก Dashboard ----------------
+if menu_choice == "📊 หน้าแรก (Dashboard)":
+    st.header("📊 สรุปภาพรวมของร้านค้า")
     
-    total_rev = df_sales["total_price"].sum() if not df_sales.empty else 0.0
-    total_cogs = df_sales["total_cost"].sum() if not df_sales.empty else 0.0
-    other_exp = df_expenses["amount"].sum() if not df_expenses.empty else 0.0
-    total_exp = total_cogs + other_exp
-    net_profit = total_rev - total_exp
-    total_stock_qty = df_products["qty"].sum() if not df_products.empty else 0
+    sum_revenue = df_sales["total_price"].sum() if not df_sales.empty else 0.0
+    sum_cogs = df_sales["total_cost"].sum() if not df_sales.empty else 0.0
+    sum_expenses = df_expenses["amount"].sum() if not df_expenses.empty else 0.0
+    total_all_expenses = sum_cogs + sum_expenses
+    total_net_profit = sum_revenue - total_all_expenses
+    count_stock = df_products["qty"].sum() if not df_products.empty else 0
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("รายรับรวม", f"฿{total_rev:,.2f}")
-    col2.metric("รายจ่ายรวม", f"฿{total_exp:,.2f}")
-    col3.metric("กำไรสุทธิ", f"฿{net_profit:,.2f}")
-    col4.metric("สินค้าคงคลังรวม (ชิ้น)", f"{total_stock_qty:,}")
+    col1.metric("ยอดขายรวม", f"฿{sum_revenue:,.2f}")
+    col2.metric("ค่าใช้จ่ายรวม", f"฿{total_all_expenses:,.2f}")
+    col3.metric("กำไรสุทธิ", f"฿{total_net_profit:,.2f}")
+    col4.metric("สินค้าเหลือในคลัง (ชิ้น)", f"{count_stock:,}")
 
     st.divider()
 
     col_left, col_right = st.columns([2, 1])
     
     with col_left:
-        st.subheader("📦 ปริมาณสินค้าคงเหลือในคลัง")
+        st.subheader("📦 กราฟแสดงจำนวนสินค้าคงเหลือ")
         if not df_products.empty:
             st.bar_chart(df_products.set_index("name")["qty"])
         else:
-            st.info("ℹ️ ยังไม่มีสินค้าในคลังสินค้า")
+            st.info("ยังไม่มีข้อมูลสินค้าในระบบ")
 
     with col_right:
-        st.subheader("⚠️ สินค้าใกล้หมด (น้อยกว่า 10 ชิ้น)")
+        st.subheader("⚠️ เตือนสินค้าเหลือน้อย (< 10)")
         if not df_products.empty:
-            low_stock = df_products[df_products["qty"] < 10][["id", "name", "qty"]].rename(
-                columns={"id": "รหัส", "name": "ชื่อ", "qty": "คงเหลือ"}
+            alert_stock = df_products[df_products["qty"] < 10][["id", "name", "qty"]].rename(
+                columns={"id": "รหัส", "name": "ชื่อสินค้า", "qty": "คงเหลือ"}
             )
-            if not low_stock.empty:
-                st.dataframe(low_stock, hide_index=True, use_container_width=True)
+            if not alert_stock.empty:
+                st.dataframe(alert_stock, hide_index=True, use_container_width=True)
             else:
-                st.success("สินค้าทุกรายการมีจำนวนเพียงพอ")
+                st.success("สินค้ายังมีพอขายทุกรายการ")
         else:
-            st.caption("ยังไม่มีรายการสินค้า")
+            st.caption("ไม่มีรายการสินค้า")
 
-# ------------------ 5. MENU 2: INVENTORY MANAGEMENT ------------------
-elif menu == "📦 จัดการสต็อกสินค้า":
-    st.header("📦 รายการสินค้าและคลังสินค้า")
+# ---------------- 5. เมนูที่ 2: จัดการสินค้าในสต็อก ----------------
+elif menu_choice == "📦 จัดการสินค้าในสต็อก":
+    st.header("📦 หน้าจัดการคลังสินค้า")
 
-    tab1, tab2 = st.tabs(["➕ เพิ่มสินค้าใหม่", "✏️ แก้ไข / ลบสินค้าในสต็อก"])
+    tab1, tab2 = st.tabs(["➕ เพิ่มสินค้าใหม่", "✏️ แก้ไข/ลบสินค้า"])
 
     with tab1:
-        st.subheader("เพิ่มสินค้าใหม่เข้าสต็อก")
+        st.subheader("กรอกข้อมูลเพื่อเพิ่มสินค้าใหม่")
         with st.form("add_product_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
-            p_id = col1.text_input("รหัสสินค้า (เช่น P001)").strip()
-            p_name = col2.text_input("ชื่อสินค้า").strip()
+            input_id = col1.text_input("รหัสสินค้า (เช่น P01)").strip()
+            input_name = col2.text_input("ชื่อสินค้า").strip()
             
             col3, col4, col5 = st.columns(3)
-            p_cost = col3.number_input("ต้นทุนต่อชิ้น (บาท)", min_value=0.0, step=1.0)
-            p_price = col4.number_input("ราคาขายต่อชิ้น (บาท)", min_value=0.0, step=1.0)
-            p_qty = col5.number_input("จำนวนเข้าสต็อก (ชิ้น)", min_value=1, step=1)
+            input_cost = col3.number_input("ราคาทุนต่อชิ้น (บาท)", min_value=0.0, step=1.0)
+            input_price = col4.number_input("ราคาขายต่อชิ้น (บาท)", min_value=0.0, step=1.0)
+            input_qty = col5.number_input("จำนวนที่นำมาเพิ่ม (ชิ้น)", min_value=1, step=1)
 
-            submitted = st.form_submit_button("➕ บันทึกสินค้าเข้าสต็อก")
-            if submitted:
-                if not p_id or not p_name:
-                    st.error("❌ กรุณากรอกรหัสสินค้าและชื่อสินค้าให้ครบถ้วน")
-                elif not df_products.empty and p_id in df_products["id"].values:
-                    st.error("❌ รหัสสินค้านี้มีอยู่ในระบบแล้ว")
+            btn_save = st.form_submit_button("บันทึกสินค้าใหม่")
+            if btn_save:
+                if not input_id or not input_name:
+                    st.error("กรุณากรอกรหัสและชื่อสินค้าให้ครบด้วยครับ")
+                elif not df_products.empty and input_id in df_products["id"].values:
+                    st.error("รหัสสินค้านี้ซ้ำครับ กรุณาใช้รหัสอื่น")
                 else:
-                    add_product(p_id, p_name, p_cost, p_price, p_qty)
-                    st.success(f"✅ เพิ่มสินค้า '{p_name}' เข้าฐานข้อมูลเรียบร้อยแล้ว!")
+                    save_new_product(input_id, input_name, input_cost, input_price, input_qty)
+                    st.success(f"บันทึกสินค้า '{input_name}' สำเร็จแล้ว!")
                     st.rerun()
 
     with tab2:
-        st.subheader("✏️ แก้ไขข้อมูลราคา / สต็อก / ลบสินค้า")
+        st.subheader("แก้ไขข้อมูลสินค้า หรือลบออกจากระบบ")
         if df_products.empty:
-            st.info("ไม่มีรายการสินค้าให้จัดการ")
+            st.info("ไม่มีรายการสินค้า")
         else:
-            product_list = [f"{row['id']} - {row['name']} (คงเหลือ: {int(row['qty'])} ชิ้น)" for _, row in df_products.iterrows()]
-            selected_option = st.selectbox("เลือกสินค้าที่ต้องการแก้ไข", product_list)
+            product_list = [f"{row['id']} - {row['name']} (เหลือ: {int(row['qty'])} ชิ้น)" for _, row in df_products.iterrows()]
+            selected_option = st.selectbox("เลือกสินค้าที่ต้องการจัดการ", product_list)
             selected_id = selected_option.split(" - ")[0]
             selected_row = df_products[df_products["id"] == selected_id].iloc[0]
 
@@ -295,267 +296,266 @@ elif menu == "📦 จัดการสต็อกสินค้า":
                 edit_qty = col_e2.number_input("จำนวนคงเหลือ (ชิ้น)", min_value=0, value=int(selected_row["qty"]), step=1)
 
                 col_e3, col_e4 = st.columns(2)
-                edit_cost = col_e3.number_input("ต้นทุนต่อชิ้น (บาท)", min_value=0.0, value=float(selected_row["cost"]), step=1.0)
-                edit_price = col_e4.number_input("ราคาขายต่อชิ้น (บาท)", min_value=0.0, value=float(selected_row["price"]), step=1.0)
+                edit_cost = col_e3.number_input("ราคาทุน (บาท)", min_value=0.0, value=float(selected_row["cost"]), step=1.0)
+                edit_price = col_e4.number_input("ราคาขาย (บาท)", min_value=0.0, value=float(selected_row["price"]), step=1.0)
 
-                col_b1, col_b2 = st.columns([1, 1])
-                btn_update = col_b1.form_submit_button("💾 บันทึกการแก้ไขข้อมูล")
+                btn_update = st.form_submit_button("บันทึกการแก้ไข")
                 
                 if btn_update:
-                    update_product_info(selected_id, edit_name, edit_cost, edit_price, edit_qty)
-                    st.success(f"✅ อัปเดตข้อมูลสินค้า '{edit_name}' เรียบร้อยแล้ว!")
+                    update_product_data(selected_id, edit_name, edit_cost, edit_price, edit_qty)
+                    st.success(f"อัปเดตข้อมูล '{edit_name}' เรียบร้อยแล้ว!")
                     st.rerun()
 
-            st.caption("⚠️ หากต้องการลบสินค้าออกจากคลัง:")
-            if st.button("🗑️ ลบสินค้านี้ออกจากระบบอย่างถาวร", type="primary"):
-                delete_product(selected_id)
-                st.success("🗑️ ลบรายการสินค้าออกจากฐานข้อมูลเรียบร้อยแล้ว!")
+            st.caption("ถ้าต้องการลบสินค้านี้ออกจากคลัง:")
+            if st.button("ลบสินค้าชิ้นนี้", type="primary"):
+                remove_product(selected_id)
+                st.success("ลบรายการสินค้าเรียบร้อยแล้ว!")
                 st.rerun()
 
     st.divider()
 
-    st.subheader("📋 รายการสินค้าทั้งหมดในสต็อก")
+    st.subheader("📋 ตารางรายการสินค้าทั้งหมด")
     
     if not df_products.empty:
-        search_query = st.text_input("🔍 ค้นหาสินค้า (พิมพ์รหัสหรือชื่อสินค้า):", "").strip().lower()
+        search_text = st.text_input("🔍 พิมพ์ค้นหาสินค้า (รหัส หรือ ชื่อ):", "").strip().lower()
         
         filtered_df = df_products.copy()
-        if search_query:
+        if search_text:
             filtered_df = filtered_df[
-                filtered_df["id"].str.lower().str.contains(search_query) | 
-                filtered_df["name"].str.lower().str.contains(search_query)
+                filtered_df["id"].str.lower().str.contains(search_text) | 
+                filtered_df["name"].str.lower().str.contains(search_text)
             ]
         
         filtered_df["มูลค่าคลังรวม"] = filtered_df["price"] * filtered_df["qty"]
-        display_df = filtered_df.rename(columns={
+        show_table = filtered_df.rename(columns={
             "id": "รหัสสินค้า",
             "name": "ชื่อสินค้า",
-            "cost": "ต้นทุนต่อชิ้น",
-            "price": "ราคาขายต่อชิ้น",
+            "cost": "ราคาทุน",
+            "price": "ราคาขาย",
             "qty": "จำนวนคงเหลือ"
         })
         
-        st.dataframe(display_df, hide_index=True, use_container_width=True)
+        st.dataframe(show_table, hide_index=True, use_container_width=True)
         
-        csv_data = convert_df_to_csv(display_df)
+        csv_file = make_csv_file(show_table)
         st.download_button(
-            label="📥 ดาวน์โหลดรายการสินค้าทั้งหมด (ไฟล์ CSV)",
-            data=csv_data,
-            file_name="coop_inventory_report.csv",
+            label="ดาวน์โหลดตารางสินค้า (ไฟล์ CSV)",
+            data=csv_file,
+            file_name="products_report.csv",
             mime="text/csv",
             use_container_width=True
         )
     else:
-        st.info("ℹ️ ยังไม่มีรายการสินค้าในระบบ")
+        st.info("ยังไม่มีสินค้าในระบบ")
 
-# ------------------ 6. MENU 3: RECORD SALES ------------------
-elif menu == "🛒 บันทึกการขาย":
-    st.header("🛒 บันทึกการขายสินค้า")
+# ---------------- 6. เมนูที่ 3: ขายสินค้า ----------------
+elif menu_choice == "🛒 ขายสินค้า":
+    st.header("🛒 หน้าบันทึกการขายสินค้า")
 
     if df_products.empty:
-        st.warning("⚠️ ยังไม่มีสินค้าในสต็อก!")
+        st.warning("ยังไม่มีสินค้าในระบบ กรุณาเพิ่มสินค้าก่อนครับ")
     else:
-        tab_sale1, tab_sale2 = st.tabs(["📝 บันทึกการขายใหม่", "✏️ แก้ไข / ยกเลิกประวัติการขาย"])
+        tab_sale1, tab_sale2 = st.tabs(["📝 ทำรายการขาย", "✏️ แก้ไข/ยกเลิกรายการขาย"])
 
         with tab_sale1:
             col_form, col_hist = st.columns([1, 1])
 
             with col_form:
-                st.subheader("📝 ทำรายการขาย")
+                st.subheader("กรอกข้อมูลการขาย")
                 
-                search_sale = st.text_input("🔍 ค้นหาสินค้าที่จะขาย (รหัส/ชื่อ):", "").strip().lower()
+                search_sell = st.text_input("🔍 ค้นหาสินค้าที่จะขาย:", "").strip().lower()
                 
-                sale_products = df_products.copy()
-                if search_sale:
-                    sale_products = sale_products[
-                        sale_products["id"].str.lower().str.contains(search_sale) | 
-                        sale_products["name"].str.lower().str.contains(search_sale)
+                sell_df = df_products.copy()
+                if search_sell:
+                    sell_df = sell_df[
+                        sell_df["id"].str.lower().str.contains(search_sell) | 
+                        sell_df["name"].str.lower().str.contains(search_sell)
                     ]
 
-                if sale_products.empty:
-                    st.error("❌ ไม่พบสินค้าที่ค้นหา")
+                if sell_df.empty:
+                    st.error("หาไม่พบสินค้าที่ค้นหาครับ")
                 else:
-                    product_options = {
-                        f"{row['id']} - {row['name']} (คงเหลือ: {int(row['qty'])} ชิ้น)": row['id']
-                        for _, row in sale_products.iterrows()
+                    item_dict = {
+                        f"{row['id']} - {row['name']} (เหลือ: {int(row['qty'])} ชิ้น)": row['id']
+                        for _, row in sell_df.iterrows()
                     }
-                    selected_option = st.selectbox("เลือกสินค้าที่ต้องการขาย", list(product_options.keys()))
-                    selected_id = product_options[selected_option]
-                    selected_row = df_products[df_products["id"] == selected_id].iloc[0]
+                    choice_str = st.selectbox("เลือกสินค้าที่จะขาย", list(item_dict.keys()))
+                    choice_id = item_dict[choice_str]
+                    current_item = df_products[df_products["id"] == choice_id].iloc[0]
 
-                    stock_qty = int(selected_row["qty"])
+                    current_qty = int(current_item["qty"])
 
-                    if stock_qty <= 0:
-                        st.error("❌ สินค้าชิ้นนี้หมดสต็อกแล้ว ไม่สามารถขายได้")
+                    if current_qty <= 0:
+                        st.error("สินค้านี้หมดแล้ว ไม่สามารถขายได้ครับ")
                     else:
-                        qty_to_sell = st.number_input(
-                            "จำนวนที่ขาย", 
+                        sell_num = st.number_input(
+                            "จำนวนที่ต้องการซื้อ", 
                             min_value=1, 
-                            max_value=stock_qty, 
+                            max_value=current_qty, 
                             step=1
                         )
 
-                        total_sale_price = float(selected_row["price"]) * qty_to_sell
-                        total_sale_cost = float(selected_row["cost"]) * qty_to_sell
-                        st.write(f"**ราคารวมทั้งสิ้น:** ฿{total_sale_price:,.2f}")
+                        calc_total = float(current_item["price"]) * sell_num
+                        calc_cost = float(current_item["cost"]) * sell_num
+                        st.write(f"**ราคารวมทั้งหมด:** ฿{calc_total:,.2f}")
 
-                        if st.button("✅ ยืนยันการขายและตัดสต็อก", use_container_width=True):
-                            record_sale(
-                                selected_id, 
-                                selected_row["name"], 
-                                qty_to_sell, 
-                                selected_row["price"], 
-                                total_sale_price, 
-                                total_sale_cost, 
-                                stock_qty
+                        if st.button("ยืนยันการขาย", use_container_width=True):
+                            save_sale_transaction(
+                                choice_id, 
+                                current_item["name"], 
+                                sell_num, 
+                                current_item["price"], 
+                                calc_total, 
+                                calc_cost, 
+                                current_qty
                             )
-                            st.success(f"✅ บันทึกการขายสำเร็จ! (ยอดขาย ฿{total_sale_price:,.2f})")
+                            st.success(f"บันทึกการขายเรียบร้อย! ยอดเงิน ฿{calc_total:,.2f}")
                             st.rerun()
 
             with col_hist:
                 st.subheader("📜 ประวัติการขายล่าสุด")
                 if not df_sales.empty:
-                    display_sales = df_sales[["product_id", "product_name", "qty", "total_price", "sale_date"]].rename(columns={
-                        "product_id": "รหัสสินค้า",
+                    show_sales = df_sales[["product_id", "product_name", "qty", "total_price", "sale_date"]].rename(columns={
+                        "product_id": "รหัส",
                         "product_name": "ชื่อสินค้า",
                         "qty": "จำนวน",
-                        "total_price": "ยอดขายรวม",
-                        "sale_date": "วันที่-เวลา"
+                        "total_price": "ราคารวม",
+                        "sale_date": "วัน-เวลา"
                     })
-                    st.dataframe(display_sales, hide_index=True, use_container_width=True)
+                    st.dataframe(show_sales, hide_index=True, use_container_width=True)
                 else:
-                    st.info("ยังไม่มีประวัติการขายในระบบ")
+                    st.info("ยังไม่มีประวัติการขาย")
 
         with tab_sale2:
-            st.subheader("✏️ แก้ไขจำนวน / ราคาขาย / ยกเลิกรายการ")
+            st.subheader("แก้ไขหรือยกเลิกรายการขาย")
             if df_sales.empty:
-                st.info("ยังไม่มีประวัติการขาย")
+                st.info("ไม่มีรายการขายให้แก้ไข")
             else:
-                sale_options = {
-                    f"รายการ #{row['id']} - {row['product_name']} ({row['qty']} ชิ้น - ยอดรวม ฿{row['total_price']:,.2f})": row['id']
+                sales_dict = {
+                    f"รายการที่ #{row['id']} - {row['product_name']} ({row['qty']} ชิ้น - รวม ฿{row['total_price']:,.2f})": row['id']
                     for _, row in df_sales.iterrows()
                 }
-                selected_sale_opt = st.selectbox("เลือกลำดับรายการขายที่ต้องการแก้ไข", list(sale_options.keys()))
-                selected_sale_id = sale_options[selected_sale_opt]
-                sale_row = df_sales[df_sales["id"] == selected_sale_id].iloc[0]
+                sale_choice = st.selectbox("เลือกรายการขายที่จะแก้ไข", list(sales_dict.keys()))
+                target_sale_id = sales_dict[sale_choice]
+                target_sale = df_sales[df_sales["id"] == target_sale_id].iloc[0]
 
                 with st.form("edit_sale_form"):
                     col_s1, col_s2 = st.columns(2)
-                    new_sale_qty = col_s1.number_input("จำนวนขายที่ถูกต้อง (ชิ้น)", min_value=1, value=int(sale_row["qty"]), step=1)
-                    new_sale_price = col_s2.number_input("ราคาขายต่อชิ้น (บาท)", min_value=0.0, value=float(sale_row["price_per_unit"]), step=1.0)
+                    fix_qty = col_s1.number_input("จำนวนที่ถูกต้อง", min_value=1, value=int(target_sale["qty"]), step=1)
+                    fix_price = col_s2.number_input("ราคาต่อชิ้น", min_value=0.0, value=float(target_sale["price_per_unit"]), step=1.0)
                     
-                    unit_cost = float(sale_row["total_cost"]) / float(sale_row["qty"]) if sale_row["qty"] > 0 else 0.0
+                    unit_c = float(target_sale["total_cost"]) / float(target_sale["qty"]) if target_sale["qty"] > 0 else 0.0
                     
-                    st.write(f"**คำนวณยอดขายใหม่:** ฿{(new_sale_qty * new_sale_price):,.2f}")
+                    st.write(f"**ยอดรวมใหม่:** ฿{(fix_qty * fix_price):,.2f}")
                     
-                    btn_update_sale = st.form_submit_button("💾 อัปเดตรายการขายนี้")
-                    if btn_update_sale:
-                        update_sale_record(
-                            selected_sale_id, 
-                            sale_row["product_id"], 
-                            int(sale_row["qty"]), 
-                            new_sale_qty, 
-                            new_sale_price, 
-                            unit_cost
+                    btn_fix_sale = st.form_submit_button("บันทึกแก้ไขรายการขาย")
+                    if btn_fix_sale:
+                        edit_sale_transaction(
+                            target_sale_id, 
+                            target_sale["product_id"], 
+                            int(target_sale["qty"]), 
+                            fix_qty, 
+                            fix_price, 
+                            unit_c
                         )
-                        st.success("✅ อัปเดตรายการขายและปรับยอดสต็อกให้เรียบร้อยแล้ว!")
+                        st.success("แก้ไขการขายและปรับสต็อกเรียบร้อย!")
                         st.rerun()
 
-                st.caption("⚠️ หากคีย์ผิดและต้องการยกเลิกบิลการขายนี้ (ระบบจะคืนจำนวนสินค้าเข้าสต็อกให้):")
-                if st.button("🗑️ ยกเลิกบิลการขายนี้", type="primary"):
-                    delete_sale_record(selected_sale_id, sale_row["product_id"], int(sale_row["qty"]))
-                    st.success("🗑️ ยกเลิกรายการขายและคืนสินค้าเข้าสต็อกเรียบร้อยแล้ว!")
+                st.caption("ถ้าขายผิดหรือต้องการยกเลิกบิลนี้ (ระบบจะคืนสต็อกเข้าคลัง):")
+                if st.button("ยกเลิกการขายบิลนี้", type="primary"):
+                    cancel_sale_transaction(target_sale_id, target_sale["product_id"], int(target_sale["qty"]))
+                    st.success("ยกเลิกรายการขายและคืนสินค้าเข้าสต็อกแล้ว!")
                     st.rerun()
 
-# ------------------ 7. MENU 4: RECORD EXPENSES ------------------
-elif menu == "💸 บันทึกรายจ่ายอื่นๆ":
-    st.header("💸 บันทึกรายจ่ายประจำวัน/ดำเนินงาน")
+# ---------------- 7. เมนูที่ 4: บันทึกค่าใช้จ่าย ----------------
+elif menu_choice == "💸 บันทึกค่าใช้จ่าย":
+    st.header("💸 หน้าบันทึกค่าใช้จ่ายอื่นๆ")
 
-    tab_exp1, tab_exp2 = st.tabs(["📝 บันทึกรายจ่ายใหม่", "✏️ แก้ไข / ลบประวัติรายจ่าย"])
+    tab_exp1, tab_exp2 = st.tabs(["📝 เพิ่มค่าใช้จ่าย", "✏️ แก้ไข/ลบค่าใช้จ่าย"])
 
     with tab_exp1:
         col_exp_form, col_exp_hist = st.columns([1, 1])
 
         with col_exp_form:
-            st.subheader("📝 บันทึกรายการใหม่")
+            st.subheader("กรอกรายการค่าใช้จ่าย")
             with st.form("expense_form", clear_on_submit=True):
-                exp_desc = st.text_input("รายละเอียดรายจ่าย").strip()
-                exp_amount = st.number_input("จำนวนเงิน (บาท)", min_value=1.0, step=10.0)
+                exp_detail = st.text_input("รายละเอียดค่าใช้จ่าย (เช่น ค่าถุงพลาสติก)").strip()
+                exp_money = st.number_input("จำนวนเงิน (บาท)", min_value=1.0, step=10.0)
                 
-                submitted_exp = st.form_submit_button("💸 บันทึกรายจ่าย")
-                if submitted_exp:
-                    if not exp_desc:
-                        st.error("❌ กรุณากรอกรายละเอียดรายจ่าย")
+                btn_save_exp = st.form_submit_button("บันทึกค่าใช้จ่าย")
+                if btn_save_exp:
+                    if not exp_detail:
+                        st.error("กรุณากรอกรายละเอียดด้วยครับ")
                     else:
-                        add_expense(exp_desc, exp_amount)
-                        st.success(f"✅ บันทึกรายจ่ายเรียบร้อย!")
+                        save_expense(exp_detail, exp_money)
+                        st.success("บันทึกค่าใช้จ่ายเรียบร้อย!")
                         st.rerun()
 
         with col_exp_hist:
-            st.subheader("📜 ประวัติรายจ่ายอื่นๆ")
+            st.subheader("📜 ประวัติค่าใช้จ่าย")
             if not df_expenses.empty:
-                display_expenses = df_expenses[["description", "amount", "expense_date"]].rename(columns={
+                show_expenses = df_expenses[["description", "amount", "expense_date"]].rename(columns={
                     "description": "รายการ",
                     "amount": "จำนวนเงิน (บาท)",
-                    "expense_date": "วันที่-เวลา"
+                    "expense_date": "วัน-เวลา"
                 })
-                st.dataframe(display_expenses, hide_index=True, use_container_width=True)
+                st.dataframe(show_expenses, hide_index=True, use_container_width=True)
             else:
-                st.info("ยังไม่มีบันทึกรายจ่ายอื่นๆ ในระบบ")
+                st.info("ยังไม่มีประวัติค่าใช้จ่าย")
 
     with tab_exp2:
-        st.subheader("✏️ แก้ไขรายละเอียดหรือจำนวนเงินรายจ่าย")
+        st.subheader("แก้ไขหรือลบรายการค่าใช้จ่าย")
         if df_expenses.empty:
-            st.info("ยังไม่มีประวัติรายจ่าย")
+            st.info("ไม่มีรายการค่าใช้จ่าย")
         else:
-            exp_options = {
-                f"รายการ #{row['id']} - {row['description']} (฿{row['amount']:,.2f})": row['id']
+            exp_dict = {
+                f"รายการ #{row['id']} - {row['description']} ({row['amount']:,.2f} บาท)": row['id']
                 for _, row in df_expenses.iterrows()
             }
-            selected_exp_opt = st.selectbox("เลือกรายการรายจ่ายที่ต้องการแก้ไข", list(exp_options.keys()))
-            selected_exp_id = exp_options[selected_exp_opt]
-            exp_row = df_expenses[df_expenses["id"] == selected_exp_id].iloc[0]
+            exp_choice = st.selectbox("เลือกรายการที่จะแก้ไข", list(exp_dict.keys()))
+            target_exp_id = exp_dict[exp_choice]
+            target_exp = df_expenses[df_expenses["id"] == target_exp_id].iloc[0]
 
             with st.form("edit_expense_form"):
-                edit_exp_desc = st.text_input("รายละเอียดรายจ่าย", value=exp_row["description"])
-                edit_exp_amount = st.number_input("จำนวนเงิน (บาท)", min_value=0.0, value=float(exp_row["amount"]), step=10.0)
+                fix_exp_detail = st.text_input("รายละเอียด", value=target_exp["description"])
+                fix_exp_money = st.number_input("จำนวนเงิน (บาท)", min_value=0.0, value=float(target_exp["amount"]), step=10.0)
 
-                btn_update_exp = st.form_submit_button("💾 บันทึกการแก้ไขรายจ่าย")
-                if btn_update_exp:
-                    update_expense(selected_exp_id, edit_exp_desc, edit_exp_amount)
-                    st.success("✅ อัปเดตรายการรายจ่ายเรียบร้อยแล้ว!")
+                btn_fix_exp = st.form_submit_button("บันทึกการแก้ไข")
+                if btn_fix_exp:
+                    edit_expense(target_exp_id, fix_exp_detail, fix_exp_money)
+                    st.success("แก้ไขข้อมูลเรียบร้อย!")
                     st.rerun()
 
-            st.caption("⚠️ หากต้องการลบรายการรายจ่ายนี้:")
-            if st.button("🗑️ ลบรายการรายจ่ายนี้", type="primary"):
-                delete_expense(selected_exp_id)
-                st.success("🗑️ ลบรายการรายจ่ายเรียบร้อยแล้ว!")
+            st.caption("ถ้าต้องการลบรายการนี้:")
+            if st.button("ลบรายการค่าใช้จ่ายนี้", type="primary"):
+                remove_expense(target_exp_id)
+                st.success("ลบรายการเรียบร้อย!")
                 st.rerun()
 
-# ------------------ 8. MENU 5: ANNUAL SUMMARY ------------------
-elif menu == "📊 สรุปบัญชีประจำปี & จัดสรรกำไร":
-    st.header("🏛️ สรุปผลการดำเนินงานประจำปี")
+# ---------------- 8. เมนูที่ 5: สรุปบัญชีและปันผล ----------------
+elif menu_choice == "📊 สรุปยอดและแบ่งปันผล":
+    st.header("📊 สรุปบัญชีประจำปี และการจัดสรรเงินปันผล")
 
-    total_revenue = df_sales["total_price"].sum() if not df_sales.empty else 0.0
-    total_cogs = df_sales["total_cost"].sum() if not df_sales.empty else 0.0
-    other_expenses = df_expenses["amount"].sum() if not df_expenses.empty else 0.0
-    total_expenses = total_cogs + other_expenses
-    net_profit = total_revenue - total_expenses
+    rev_total = df_sales["total_price"].sum() if not df_sales.empty else 0.0
+    cogs_total = df_sales["total_cost"].sum() if not df_sales.empty else 0.0
+    exp_total = df_expenses["amount"].sum() if not df_expenses.empty else 0.0
+    expenses_all = cogs_total + exp_total
+    profit_net = rev_total - expenses_all
 
-    summary_table = [
-        {"รายการ": "1. รายรับรวมจากการขาย", "จำนวนเงิน (บาท)": f"฿{total_revenue:,.2f}"},
-        {"รายการ": "2.1 ต้นทุนสินค้าที่ขาย (COGS)", "จำนวนเงิน (บาท)": f"฿{total_cogs:,.2f}"},
-        {"รายการ": "2.2 รายจ่ายดำเนินงานอื่นๆ", "จำนวนเงิน (บาท)": f"฿{other_expenses:,.2f}"},
-        {"รายการ": "2. รวมรายจ่ายทั้งสิ้น", "จำนวนเงิน (บาท)": f"฿{total_expenses:,.2f}"},
-        {"รายการ": "3. กำไรสุทธิประจำปี", "จำนวนเงิน (บาท)": f"฿{net_profit:,.2f}"}
+    summary_list = [
+        {"รายการ": "1. รายรับรวมจากการขายทั้งหมด", "จำนวนเงิน (บาท)": f"฿{rev_total:,.2f}"},
+        {"รายการ": "2.1 ต้นทุนของสินค้าที่ขายไป", "จำนวนเงิน (บาท)": f"฿{cogs_total:,.2f}"},
+        {"รายการ": "2.2 ค่าใช้จ่ายอื่นๆ", "จำนวนเงิน (บาท)": f"฿{exp_total:,.2f}"},
+        {"รายการ": "2. รวมค่าใช้จ่ายทั้งหมด", "จำนวนเงิน (บาท)": f"฿{expenses_all:,.2f}"},
+        {"รายการ": "3. กำไรสุทธิที่ได้", "จำนวนเงิน (บาท)": f"฿{profit_net:,.2f}"}
     ]
-    st.table(pd.DataFrame(summary_table))
+    st.table(pd.DataFrame(summary_list))
 
-    if net_profit > 0:
-        reserve_rate = st.slider("เปอร์เซ็นต์หักเข้าทุนสำรอง (%)", min_value=10, max_value=100, value=10)
-        reserve_amount = net_profit * (reserve_rate / 100.0)
-        dividend_pool = net_profit - reserve_amount
+    if profit_net > 0:
+        percent_reserve = st.slider("เลือก % เพื่อหักเข้าทุนสำรองโรงเรียน", min_value=10, max_value=100, value=10)
+        reserve_money = profit_net * (percent_reserve / 100.0)
+        dividend_money = profit_net - reserve_money
 
-        col_res1, col_res2 = st.columns(2)
-        col_res1.success(f"🏛️ **ทุนสำรอง ({reserve_rate}%):** ฿{reserve_amount:,.2f}")
-        col_res2.info(f"🎁 **สำหรับจัดสรรปันผล:** ฿{dividend_pool:,.2f}")
+        col_r1, col_r2 = st.columns(2)
+        col_r1.success(f"🏫 **เงินเข้าทุนสำรอง ({percent_reserve}%):** ฿{reserve_money:,.2f}")
+        col_r2.info(f"🎁 **เงินปันผลสำหรับสมาชิก:** ฿{dividend_money:,.2f}")
